@@ -1,0 +1,227 @@
+#!/usr/bin/env python3
+"""
+Inventory Prediction Tool
+
+This script simulates demand data, forecasts future demand using linear regression,
+calculates inventory metrics, and visualizes the results.
+"""
+
+import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
+from sklearn.linear_model import LinearRegression
+from datetime import datetime, timedelta
+import math
+
+def simulate_demand_data(days=30, base_demand=100, noise_level=20, trend=1.5):
+    """
+    Simulate demand data for a given number of days.
+    
+    Args:
+        days: Number of days to simulate
+        base_demand: Base demand level
+        noise_level: Level of randomness
+        trend: Trend factor (>1 for upward trend, <1 for downward)
+    
+    Returns:
+        DataFrame with Date and Demand columns
+    """
+    # Generate dates
+    start_date = datetime.now() - timedelta(days=days)
+    dates = [start_date + timedelta(days=i) for i in range(days)]
+    
+    # Generate demand with some randomness and trend
+    demands = []
+    for i in range(days):
+        # Base demand with trend and random noise
+        demand = base_demand * (trend ** (i/days)) + np.random.normal(0, noise_level)
+        # Ensure demand is positive
+        demand = max(0, round(demand))
+        demands.append(demand)
+    
+    # Create DataFrame
+    df = pd.DataFrame({
+        'Date': dates,
+        'Demand': demands
+    })
+    
+    return df
+
+def forecast_demand(historical_data, forecast_days=30):
+    """
+    Forecast demand using linear regression.
+    
+    Args:
+        historical_data: DataFrame with Date and Demand columns
+        forecast_days: Number of days to forecast
+    
+    Returns:
+        DataFrame with forecasted demand
+    """
+    # Convert dates to numeric feature for regression (days since first date)
+    first_date = historical_data['Date'].min()
+    historical_data['Days'] = (historical_data['Date'] - first_date).dt.days
+    
+    # Prepare X and y for regression
+    X = historical_data[['Days']].values
+    y = historical_data['Demand'].values
+    
+    # Train linear regression model
+    model = LinearRegression()
+    model.fit(X, y)
+    
+    # Generate dates for forecast period
+    last_date = historical_data['Date'].max()
+    forecast_dates = [last_date + timedelta(days=i+1) for i in range(forecast_days)]
+    
+    # Generate Days feature for forecast dates
+    forecast_days_numeric = [(last_date + timedelta(days=i+1) - first_date).days 
+                             for i in range(forecast_days)]
+    
+    # Predict demand
+    forecast_X = np.array(forecast_days_numeric).reshape(-1, 1)
+    forecast_demand = model.predict(forecast_X)
+    
+    # Ensure demand is positive and round to integers
+    forecast_demand = np.maximum(0, forecast_demand)
+    forecast_demand = np.round(forecast_demand).astype(int)
+    
+    # Create forecast DataFrame
+    forecast_df = pd.DataFrame({
+        'Date': forecast_dates,
+        'Predicted_Demand': forecast_demand
+    })
+    
+    # Print model information
+    print("\nLinear Regression Model:")
+    print(f"Coefficient: {model.coef_[0]:.2f}")
+    print(f"Intercept: {model.intercept_:.2f}")
+    print(f"Equation: Demand = {model.coef_[0]:.2f} * Days + {model.intercept_:.2f}")
+    
+    return forecast_df
+
+def calculate_eoq(annual_demand, ordering_cost, holding_cost):
+    """
+    Calculate Economic Order Quantity (EOQ).
+    
+    Args:
+        annual_demand: Annual demand quantity
+        ordering_cost: Cost per order
+        holding_cost: Annual holding cost per unit
+    
+    Returns:
+        EOQ value
+    """
+    return round(math.sqrt((2 * annual_demand * ordering_cost) / holding_cost))
+
+def calculate_reorder_point(avg_daily_demand, lead_time_days, safety_stock=0):
+    """
+    Calculate reorder point.
+    
+    Args:
+        avg_daily_demand: Average daily demand
+        lead_time_days: Lead time in days
+        safety_stock: Safety stock quantity
+    
+    Returns:
+        Reorder point value
+    """
+    return round(avg_daily_demand * lead_time_days + safety_stock)
+
+def plot_demand_forecast(historical_data, forecast_data):
+    """
+    Plot historical and forecasted demand.
+    
+    Args:
+        historical_data: DataFrame with historical demand
+        forecast_data: DataFrame with forecasted demand
+    """
+    plt.figure(figsize=(12, 6))
+    
+    # Plot historical demand
+    plt.plot(historical_data['Date'], historical_data['Demand'], 
+             'b-', label='Actual Demand', marker='o')
+    
+    # Plot forecasted demand
+    plt.plot(forecast_data['Date'], forecast_data['Predicted_Demand'], 
+             'r--', label='Forecasted Demand', marker='x')
+    
+    # Add labels and title
+    plt.xlabel('Date')
+    plt.ylabel('Demand Quantity')
+    plt.title('Inventory Demand Forecast')
+    plt.legend()
+    plt.grid(True, linestyle='--', alpha=0.7)
+    
+    # Format x-axis dates
+    plt.gcf().autofmt_xdate()
+    
+    # Add vertical line to separate historical from forecasted
+    last_historical_date = historical_data['Date'].max()
+    plt.axvline(x=last_historical_date, color='green', linestyle='-', 
+                alpha=0.5, label='Forecast Start')
+    
+    plt.tight_layout()
+    
+    # Save the figure to a file
+    plt.savefig('demand_forecast.png')
+    print("Plot saved to 'demand_forecast.png'")
+    
+    # Also try to show the plot in interactive mode if possible
+    try:
+        plt.show(block=False)
+    except Exception as e:
+        print(f"Note: Interactive plot display not available: {e}")
+
+def main():
+    """Main function to run the inventory prediction tool."""
+    print("\n" + "="*50)
+    print("INVENTORY PREDICTION TOOL")
+    print("="*50)
+    
+    # 1. Simulate demand data for 30 days
+    print("\nSimulating 30 days of historical demand data...")
+    historical_demand = simulate_demand_data(days=30)
+    
+    print("\nHistorical Demand Data (First 5 rows):")
+    print(historical_demand.head())
+    
+    # 2. Forecast demand for the next 30 days using linear regression
+    print("\nForecasting demand for the next 30 days...")
+    forecast_data = forecast_demand(historical_demand, forecast_days=30)
+    
+    # 3. Display the forecasted demand
+    print("\nForecasted Demand (First 5 rows):")
+    print(forecast_data.head())
+    
+    # 4. Calculate inventory metrics
+    # Calculate annual demand from daily average
+    daily_avg_demand = historical_demand['Demand'].mean()
+    annual_demand = daily_avg_demand * 365
+    
+    # Sample values for ordering and holding costs
+    ordering_cost = 50  # cost per order
+    holding_cost = 5    # annual holding cost per unit
+    lead_time_days = 7  # lead time in days
+    
+    # Calculate EOQ
+    eoq = calculate_eoq(annual_demand, ordering_cost, holding_cost)
+    
+    # Calculate Reorder Point
+    reorder_point = calculate_reorder_point(daily_avg_demand, lead_time_days)
+    
+    # Display inventory metrics
+    print("\nInventory Metrics:")
+    print(f"Average Daily Demand: {daily_avg_demand:.2f} units")
+    print(f"Estimated Annual Demand: {annual_demand:.2f} units")
+    print(f"Economic Order Quantity (EOQ): {eoq} units")
+    print(f"Reorder Point (with {lead_time_days}-day lead time): {reorder_point} units")
+    
+    # 5. Plot actual vs. predicted demand
+    print("\nGenerating demand forecast plot...")
+    plot_demand_forecast(historical_demand, forecast_data)
+    
+    print("\nInventory prediction analysis complete!")
+
+if __name__ == "__main__":
+    main()
